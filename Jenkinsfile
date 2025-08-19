@@ -25,10 +25,7 @@ pipeline {
         
         stage("Build app") {
             steps {
-                script {
-                    def mavenBuild = new org.iti.mvn()
-                    mavenBuild.javaBuild("package install")
-                }
+              sh "mvn package install"
             }
         }
         
