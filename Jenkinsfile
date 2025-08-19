@@ -38,7 +38,7 @@ pipeline {
         stage("Docker build") {
             steps {
                 script {
-                    def docker = new com.iti.docker()
+                    def docker = new com.iti.build()
                     docker.build("${env.DOCKER_IMAGE}", "${BUILD_NUMBER}")
                 }
             }
@@ -47,10 +47,10 @@ pipeline {
         stage("Push java app image") {
             steps {
                 script {
-                    def docker = new com.iti.docker()
+                    def docker = new com.iti.push()
                     sh "echo ${env.DOCKER_PASS} | docker login -u ${env.DOCKER_USER} --password-stdin"
 
-                    docker.push("${env.DOCKER_IMAGE}", "${BUILD_NUMBER}")
+                   docker.push("${env.DOCKER_IMAGE}", "${BUILD_NUMBER}")
                 }
             }
         }
@@ -78,7 +78,7 @@ pipeline {
                 )]) {
                         sh """
                             git remote set-url origin https://${GIT_USER}:${GIT_TOKEN}@github.com/MahmoudEhab1/argocd.git
-                            git push origin HEAD:main
+                            git push origin main
                             """
                 }
                 }
