@@ -1,45 +1,92 @@
 @Library('iti-sharedlib')_
 
-properties([
-    disableConcurrentBuilds()
-])
+pipeline {
+    agent any
+    
+    options {
+        disableConcurrentBuilds()
+    }
 
-node {
+    environment {
+        DOCKER_USER = credentials('docker-username')
+        DOCKER_PASS = credentials('docker-password')
+    }
 
-    def javaHome = tool name: 'java-11', type: 'jdk'
-    def mavenHome = tool name: 'mvn-3-5-4', type: 'maven'
-    def DOCKER_USER = credentials('docker-username')
-    def DOCKER_PASS = credentials('docker-password')
+    stages {
+        stage("Get code") {
+            steps {
+                checkout scmGit(
+                    branches: [[name: '*/master']], 
+                    extensions: [], 
+                    userRemoteConfigs: [[url: 'https://github.com/MahmoudEhab1/java.git']]
+                )
+            }
+        }
+        
+        stage("Build app") {
+            steps {
+                script {
+                    def mavenBuild = new org.iti.mvn()
+                    mavenBuild.javaBuild("package install")
+                }
+            }
+        }
+        
+        stage("Archive app") {
+            steps {
+                archiveArtifacts artifacts: '/*.jar', followSymlinks: false
+            }
+        }
+        
+        stage("Docker build") {
+            steps {
+                script {
+                    def docker = new com.iti.docker()
+                    docker.build("${env.DOCKER_IMAGE}", "${BUILD_NUMBER}")
+                }
+            }
+        }
+        
+        stage("Push java app image") {
+            steps {
+                script {
+                    def docker = new com.iti.docker()
+                    sh "echo ${env.DOCKER_PASS} | docker login -u ${env.DOCKER_USER} --password-stdin"
 
-    stage("Get code"){
-        checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Hassan-Eid-Hassan/java.git']])
-    }
-    stage("build app"){
-        env.JAVA_HOME = javaHome
-        env.PATH = "${javaHome}/bin:${mavenHome}/bin:${env.PATH}"
-        sh 'java -version'
-        sh 'mvn -version'
-
-        def mavenBuild = new org.iti.mvn()
-        mavenBuild.javaBuild("package install")
-
-    }
-    stage("archive app"){
-        archiveArtifacts artifacts: '**/*.jar', followSymlinks: false
-    }
-    stage("docker build"){
-        def docker = new com.iti.docker()
-        docker.build("iti-java", "${BUILD_NUMBER}")
-    }
-    stage("push java app image"){
-        def docker = new com.iti.docker()
-        docker.login("${DOCKER_USER}", "${DOCKER_PASS}")
-        docker.push("iti-java", "${BUILD_NUMBER}")
-    }
-    stage("push java app image"){
-        sh "mkdir argocd"
-        sh "cd argocd"
-        checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Hassan-Eid-Hassan/argocd.git']])
-        sh "sed -i #        image: .*#        image: iti-java:${BUILD_NUMBER}# iti-dev/deployment.yaml"
-    }
+                    docker.push("${env.DOCKER_IMAGE}", "${BUILD_NUMBER}")
+                }
+            }
+        }
+        
+       stage("Update image") {
+           steps {
+                script {
+                dir('argocd') {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/MahmoudEhab1/argocd.git',
+                            credentialsId: 'GITHUB-CREDENTIALS' 
+                        ]]
+                    ])
+                    sh "sed -i 's#        image: .*#        image: ${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}#' iti-dev/deployment.yaml"
+                    sh "git add ."
+                    sh "git commit -m 'update Image'"
+                    withCredentials([usernamePassword(
+                        credentialsId: 'GITHUB-CREDENTIALS',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                )]) {
+                        sh """
+                            git remote set-url origin https://${GIT_USER}:${GIT_TOKEN}@github.com/MahmoudEhab1/argocd.git
+                            git push origin HEAD:main
+                            """
+                }
+                }
+            }
+    }
+}
+    }
 }
